@@ -5,13 +5,13 @@ from openai import OpenAI, OpenAIError
 load_dotenv(override=True)
 
 #创建与大模型交互的客户端对象 （DEEPSEEK_API_KEY环境变量的名字，值是api key的值）
-client = OpenAI(api_key=os.environ.get('DEEPSEEK_API_KEY'), base_url="https://api.deepseek.com")
+client = OpenAI(api_key=os.environ.get('DEEPSEEK_API_KEY'), base_url=os.getenv("DEEPSEEK_BASE_URL"))
 
 
 #与大模型交互
 try:
     response = client.chat.completions.create(
-        model="deepseek-flash",
+        model=os.getenv("DEEPSEEK_MODEL"),
         messages=[
             {"role": "system", "content": "You are a helpful assistant"},
             {"role": "user", "content": "1+1"},
