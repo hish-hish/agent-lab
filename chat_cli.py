@@ -8,36 +8,70 @@ from openai import OpenAI, OpenAIError
 load_dotenv(override=True)
 
 #创建与大模型交互的客户端对象 （DEEPSEEK_API_KEY环境变量的名字，值是api key的值）
-client = OpenAI(api_key=os.environ.get('DEEPSEEK_API_KEY'), base_url=os.getenv("DEEPSEEK_BASE_URL"))
+client = OpenAI(api_key=os.environ.get('DEEPSEEK_API_KEY'), base_url=os.getenv("DEEPSEEK_BASE_URL"),timeout=30,max_retries=0)
 
 #与大模型交互 多轮对话
 messages = [{"role": "system", "content": "You are a helpful assistant"}]
 while True:
     user_content = input("请输入您想要的内容:")
 
-    if user_content != "退出":
-        try:
-            messages.append({"role": "user", "content": user_content})
-            response = client.chat.completions.create(
-                model=os.getenv("DEEPSEEK_MODEL"),
-                messages=messages,
-                stream=False,
-            )
+    if user_content != "退出" and user_content != "tuichu":
+        messages.append({"role": "user", "content": user_content})
+        system_content = None
+        i = 0
+        for attempt in range(3):
+            try:
+                i += 1
+                response = client.chat.completions.create(
+                    model=os.getenv("DEEPSEEK_MODEL"),
+                    messages=messages,
+                    stream=False,
+                )
 
-            system_content = response.choices[0].message.content
-            print()
-            print(system_content)
-            print(f"提示词消耗tokens：{response.usage.prompt_tokens}")
-            print(f"输出消耗tokens：{response.usage.completion_tokens}")
-            print(f"总tokens：{response.usage.total_tokens}")
 
-        except OpenAIError as e:
-            print(type(e).__name__, e)
+                system_content = response.choices[0].message.content
+                print()
+                print(system_content)
+                print(f"提示词消耗tokens：{response.usage.prompt_tokens}")
+                print(f"输出消耗tokens：{response.usage.completion_tokens}")
+                print(f"总tokens：{response.usage.total_tokens}")
+                break
+
+            except OpenAIError as e:
+                print(type(e).__name__, e)
+                match type(e).__name__:
+                    case "APITimeoutError":
+                        print("超时")
+                        time.sleep(1)
+                    case "APIConnectionError":
+                        print("网络问题")
+                        time.sleep(1)
+                    case "RateLimitError":
+                        print("限流")
+                        time.sleep(1)
+                    case "InternalServerError":
+                        print("服务端临时故障")
+                        time.sleep(1)
+                    case _:
+                        print("模型或程序问题")
+
+                if type(e).__name__ not in ("APITimeoutError", "APIConnectionError", "RateLimitError",
+                                            "InternalServerError"):
+                    break
+
+        if system_content is None:
+            break
+
+        if i == 2:
+            break
+
+        if system_content != None:
+            messages.append({"role": "system", "content": system_content})
 
     else:
         break
 
-    messages.append({"role": "system", "content": system_content})
+
 
 
 
