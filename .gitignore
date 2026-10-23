@@ -12,3 +12,6 @@ wheels/
 .env.*
 !.env.example
 .idea/
+
+app.log
+*.log
