@@ -1,6 +1,9 @@
 import json
 import logging
 import sys
+import ast
+import time
+import operator
 
 from json_probe import client,MODEL
 
@@ -15,8 +18,48 @@ logging.basicConfig(
 )
 log = logging.getLogger("agent-lab")
 
+_WEATHER = {
+    "北京":"晴，26°C",
+    "上海":"多云，29°C",
+    "深圳":"雷阵雨，31°C"
+}
+
 def get_weather(city:str):
-    return f"{city}:rain，26度"
+    if city in _WEATHER:
+        return f"{city}:{_WEATHER[city]}"
+    raise ValueError(f"没有[{city}]的数据，可查询：{'、'.join(_WEATHER)}")
+
+_OPS = {
+    ast.Add: operator.add,      # 加
+    ast.Sub: operator.sub,      # 减
+    ast.Mult: operator.mul,     # 乘
+    ast.Div: operator.truediv,  # 除
+    ast.Pow: operator.pow,      # 乘方
+}
+
+def calculator(expr: str) -> str:
+    """只允许数字和 + - * / **，不用 eval"""
+
+    def walk(node):
+        if isinstance(node, ast.Expression):
+            return walk(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](walk(node.left), walk(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -walk(node.operand)
+        raise ValueError(f"不支持的表达式片段: {ast.dump(node)}")
+
+    value = walk(ast.parse(expr, mode="eval"))
+    return str(round(value, 6))
+
+
+def get_time() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")#年月日时分秒
+
+
+
 
 #用文字给模型写一份说明书，模型按name，description，parameters生成数据，再dispatch这个name的函数
 TOOLS = [{
@@ -33,9 +76,42 @@ TOOLS = [{
         },
         "strict": True,
     }
-}]
+},
+{
+    "type": "function",#声明是函数
+    "function":{
+        "name": "calculator",
+        "description":"当用户想要进行简单的数学计算",#判断什么时候调用
+        "parameters": {
+            "type": "object",
+            "properties": {
+            "expr": {"type": "string", "description": "用户输入数据，类似1+1"}
+            },
+            "required": ["expr"]
+        },
+        "strict": True
+},
+},
+{
+    "type": "function",#声明是函数
+    "function":{
+        "name": "get_time",
+        "description":"当用户想要现在的时间",#判断什么时候调用
+        "parameters": {
+            "type": "object",
+            "properties": {},#有输入才描述
+            "required": [],
+        "strict": True
+},},}
+]
 
-messages = [{"role": "user", "content": "今天天气怎么样"}]
+TOOL_MAP = {
+    "get_weather": get_weather,
+    "calculator": calculator,
+    "get_time": get_time,
+}
+
+messages = [{"role": "user", "content": "计算器算100/0"}]
 
 #进行循环对话
 MAX_ROUNDS = 5
@@ -63,21 +139,30 @@ while round_no < MAX_ROUNDS + 1:
     if fr != "tool_calls":
         log.error(f"round = {round_no},异常终止,finish_reason = {fr}")
         break
-
-    tc = msg.tool_calls[0]
-    args = json.loads(tc.function.arguments)  # 得到get_weather
-    if tc.function.name == "get_weather":
-        result = get_weather(args["city"])  # 用args是因为json.loads后是dict
-    else:
-        result = f"未知工具：{tc.function.name}"
-    log.info("round=%d tool=%s args=%s result_len=%d", round_no, tc.function.name, args, len(result))
-
+    #上文出现stop则输出后停止，出现非stop且非"tool_calls"则报错异常
+    #下文表示出"tool_calls"的情况
     messages.append(msg)
-    messages.append({
+
+    for tc in msg.tool_calls:
+        args = json.loads(tc.function.arguments)#arguments实参
+        fn = TOOL_MAP.get(tc.function.name)#查tc.function.name是否在TOOL_MAP中
+
+        if fn is None:
+            result = f"未知工具：{tc.function.name}"
+        else:
+            try:
+                result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
+            except Exception as e:
+                result = f"工具执行失败：{type(e).__name__}: {e}"
+
+        log.info("round=%d tool=%s args=%s result_len=%d",
+                 round_no, tc.function.name, args, len(result))
+
+        messages.append({
         "role": "tool",
         "tool_call_id": tc.id,
         "content": result,
-    })
+        })
     round_no += 1
 
 if final_answer is None:
