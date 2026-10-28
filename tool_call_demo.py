@@ -4,6 +4,7 @@ import sys
 import ast
 import time
 import operator
+import re
 
 from json_probe import client,MODEL
 
@@ -27,7 +28,7 @@ _WEATHER = {
 def get_weather(city:str):
     if city in _WEATHER:
         return f"{city}:{_WEATHER[city]}"
-    raise ValueError(f"没有[{city}]的数据，可查询：{'、'.join(_WEATHER)}")
+
 
 _OPS = {
     ast.Add: operator.add,      # 加
@@ -111,7 +112,31 @@ TOOL_MAP = {
     "get_time": get_time,
 }
 
-messages = [{"role": "user", "content": "计算器算100/0"}]
+
+_ALLOWED_EXPR = re.compile(r"^[0-9+\-*/(). ]+$")
+
+def validate_args(tool_name: str, args: dict) -> list[str]:
+    """返回所有不合法原因；空列表 = 通过。"""
+    errors: list[str] = []
+
+    if tool_name == "get_weather":
+        city = args.get("city")
+        if not city:
+            errors.append("缺少 city 参数")
+        elif city not in _WEATHER:
+            errors.append(f"没有「{city}」的天气数据，可查询：{'、'.join(_WEATHER)}")
+
+    if tool_name == "calculator":
+        expr = args.get("expr")
+        if not expr:
+            errors.append("缺少expr")
+        if not _ALLOWED_EXPR.match(expr):
+            error.append("表达式只能包含数字和 + - * / ( ) .")
+
+
+    return errors
+
+messages = [{"role": "user", "content": "7//2"}]
 
 #进行循环对话
 MAX_ROUNDS = 5
@@ -150,10 +175,14 @@ while round_no < MAX_ROUNDS + 1:
         if fn is None:
             result = f"未知工具：{tc.function.name}"
         else:
-            try:
-                result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
-            except Exception as e:
-                result = f"工具执行失败：{type(e).__name__}: {e}"
+            errors = validate_args(tc.function.name, args)#模型给args后不进函数，先判断
+            if errors:
+                result = result = "参数校验失败：" + "；".join(errors)
+            else:
+                try:
+                    result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
+                except Exception as e:
+                    result = f"工具执行失败：{type(e).__name__}: {e}"
 
         log.info("round=%d tool=%s args=%s result_len=%d",
                  round_no, tc.function.name, args, len(result))

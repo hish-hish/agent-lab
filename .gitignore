@@ -15,3 +15,10 @@ wheels/
 
 app.log
 *.log
+
+# 3GPP 规范文档（有版权，体积大，从 3gpp.org 自取，见 README）
+data/
+
+# 临时解析产物
+4.7_excerpt.md
+*_excerpt.md
