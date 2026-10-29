@@ -1,7 +1,7 @@
 [project]
 name = "agent-lab"
 version = "0.1.0"
-description = "Add your description here"
+description = "手写 AI Agent 实验仓库：API 调用 / 结构化输出 / Function Calling / 3GPP 文档解析"
 readme = "README.md"
 authors = [
     { name = "hish-hish", email = "3196593523@qq.com" }
