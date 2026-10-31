@@ -9,6 +9,7 @@ import re
 from json_probe import client,MODEL
 from pathlib import Path
 from docx import Document
+from openai import APITimeoutError, APIConnectionError, InternalServerError, RateLimitError
 
 #设置info输出
 logging.basicConfig(
@@ -211,91 +212,109 @@ def validate_args(tool_name: str, args: dict) -> list[str]:
 
     return errors
 
-#用户指令
-messages = [{"role": "user", "content": "5.3.5.1"}]
-
-#进行循环对话
-MAX_ROUNDS = 5
-final_answer = None
-round_no = 1
-seen = {}#账本 用来记录之前是否问过
-
-# ReAct
-while round_no < MAX_ROUNDS + 1:# ReAct
-
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=messages,
-        tools=TOOLS,  # 这行决定调用工具
-        tool_choice="auto",#强制调用，必须产出一个 tool_calls，不能文本输出 #tool_choice="none"禁止调工具，只说话
-        #tool_choice="auto"自己决定 tool_choice={"type": "function", "function": {"name": "get_weather"}}调指定的
-        #tool_choice="required" 必须调工具
-        reasoning_effort="none",#关闭thinking
-        temperature=0,
-        max_tokens=1500
-    )
-    log.info("round=%d prompt_tokens=%d total=%d", round_no, resp.usage.prompt_tokens, resp.usage.total_tokens)
-    fr = resp.choices[0].finish_reason
-    msg = resp.choices[0].message
-
-    if fr == "stop":
-        final_answer = msg.content
-        log.info("round=%d 结束 fr=stop 答案长度=%d", round_no, len(final_answer or ""))
-        break
-    if fr != "tool_calls":
-        log.error(f"round = {round_no},异常终止,finish_reason = {fr}")
-        break
-    #上文出现stop则输出后停止，出现非stop且非"tool_calls"则报错异常
-    #下文表示出"tool_calls"的情况
-    messages.append(msg)
-
-    for tc in msg.tool_calls:
-        args = json.loads(tc.function.arguments)#arguments实参
-        fn = TOOL_MAP.get(tc.function.name)#查tc.function.name是否在TOOL_MAP中
-        fp = f"{tc.function.name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}"
-        if tc.function.name != "get_time" and fp in seen:
-            result = f"重复调用：你刚用相同参数调过 {tc.function.name}，结果见上一条 tool 消息。请换参数，或直接回答。"
-        else:
-            if fn is None:
-                result = f"未知工具：{tc.function.name}"
+#加重试
+RETRY = ("APITimeoutError", "APIConnectionError", "InternalServerError", "RateLimitError")
+def _create_with_retry(**kwargs):
+    """调模型，可重试的错误最多试 3 次，间隔 1s / 2s。"""
+    for attempt in range(1, 4):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            name = type(e).__name__
+            if name in RETRY:
+                if attempt == 3:
+                    raise
+                wait = 2 ** (attempt - 1)
+                log.warning("第 %d 次失败 %s，%d 秒后重试", attempt, name, wait)
+                time.sleep(wait)
             else:
-                errors = validate_args(tc.function.name, args)#模型给args后不进函数，先判断
-                if errors:
-                    result = "参数校验失败：" + "；".join(errors)
+                raise
+
+
+def run_agent(question: str) -> dict:
+    # 用户指令
+    messages = [{"role": "user", "content": question}]
+
+    # 进行循环对话
+    MAX_ROUNDS = 5
+    final_answer = None
+    round_no = 1
+    seen = {}  # 账本 用来记录之前是否问过
+
+    # ReAct
+    while round_no < MAX_ROUNDS + 1:  # ReAct
+
+        resp = _create_with_retry(
+            model=MODEL,
+            messages=messages,
+            tools=TOOLS,  # 这行决定调用工具
+            tool_choice="auto",  # 强制调用，必须产出一个 tool_calls，不能文本输出 #tool_choice="none"禁止调工具，只说话
+            # tool_choice="auto"自己决定 tool_choice={"type": "function", "function": {"name": "get_weather"}}调指定的
+            # tool_choice="required" 必须调工具
+            reasoning_effort="none",  # 关闭thinking
+            temperature=0,
+            max_tokens=1500
+        )
+        log.info("round=%d prompt_tokens=%d total=%d", round_no, resp.usage.prompt_tokens, resp.usage.total_tokens)
+        fr = resp.choices[0].finish_reason
+        msg = resp.choices[0].message
+
+        if fr == "stop":
+            final_answer = msg.content
+            log.info("round=%d 结束 fr=stop 答案长度=%d", round_no, len(final_answer or ""))
+            break
+        if fr != "tool_calls":
+            log.error(f"round = {round_no},异常终止,finish_reason = {fr}")
+            break
+        # 上文出现stop则输出后停止，出现非stop且非"tool_calls"则报错异常
+        # 下文表示出"tool_calls"的情况
+        messages.append(msg)
+
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments)  # arguments实参
+            except json.JSONDecodeError:
+                result = f"参数解析失败：{tc.function.arguments[:100]}"
+            else:
+                fn = TOOL_MAP.get(tc.function.name)  # 查tc.function.name是否在TOOL_MAP中
+                fp = f"{tc.function.name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+                if tc.function.name != "get_time" and fp in seen:
+                    result = f"重复调用：你刚用相同参数调过 {tc.function.name}，结果见上一条 tool 消息。请换参数，或直接回答。"
                 else:
-                    try:
-                        result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
-                    except Exception as e:
-                        result = f"工具执行失败：{type(e).__name__}: {e}"
-            seen[fp] = result
-        log.info("round=%d tool=%s args=%s result_len=%d",
-                 round_no, tc.function.name, args, len(result))
+                    if fn is None:
+                        result = f"未知工具：{tc.function.name}"
+                    else:
+                        errors = validate_args(tc.function.name, args)  # 模型给args后不进函数，先判断
+                        if errors:
+                            result = "参数校验失败：" + "；".join(errors)
+                        else:
+                            try:
+                                result = fn(**args)  # fn首先是函数名，然后**把字典拆成关键字参数
+                            except Exception as e:
+                                result = f"工具执行失败：{type(e).__name__}: {e}"
+                    seen[fp] = result
+            log.info("round=%d tool=%s args=%s result_len=%d",
+                         round_no, tc.function.name, args, len(result))
 
-        messages.append({
-        "role": "tool",
-        "tool_call_id": tc.id,
-        "content": result,
-        })
-    round_no += 1
+            messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result,
+                })
+        round_no += 1
 
-if final_answer is None:
-    print(f"达到上限{MAX_ROUNDS}仍未得到答案")
-else:
-    print("最终答案：", final_answer)
+    return {
+            "ok": final_answer is not None,
+            "answer": final_answer,
+            "rounds": MAX_ROUNDS if final_answer is None else round_no,
+        }
+
+if __name__ == "__main__":
+    result = run_agent("北京天气怎么样")
+    print(result)
 
 
 
-
-
-# resp2 = client.chat.completions.create(
-#     model=MODEL,
-#     messages=messages,
-#     temperature=0,
-#     max_tokens=1500,
-# )
-#
-# print("第二次 finish_reason:", resp2.choices[0].finish_reason)
-# print("最终答案:", resp2.choices[0].message.content)#第一次的"空"是因为它在选工具，不是因为出错；第二次的"有"是因为你把答案递到它嘴边了。
 """第一次：模型看到 [问题]，手里没有数据
         → 判断"我需要数据"
         → 有 tools 才能把这个判断变成 tool_calls
