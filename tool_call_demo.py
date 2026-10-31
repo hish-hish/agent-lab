@@ -8,6 +8,7 @@ import re
 
 from json_probe import client,MODEL
 
+#设置info输出
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -19,6 +20,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("agent-lab")
 
+#天气数据库
 _WEATHER = {
     "北京":"晴，26°C",
     "上海":"多云，29°C",
@@ -121,28 +123,35 @@ def validate_args(tool_name: str, args: dict) -> list[str]:
 
     if tool_name == "get_weather":
         city = args.get("city")
+
         if not city:
             errors.append("缺少 city 参数")
+
         elif city not in _WEATHER:
             errors.append(f"没有「{city}」的天气数据，可查询：{'、'.join(_WEATHER)}")
 
     if tool_name == "calculator":
-        expr = args.get("expr")
+        expr = (args.get("expr") or "").strip()
+        args["expr"] = expr
         if not expr:
             errors.append("缺少expr")
-        if not _ALLOWED_EXPR.match(expr):
-            error.append("表达式只能包含数字和 + - * / ( ) .")
 
+        elif not _ALLOWED_EXPR.match(expr):
+            errors.append("表达式只能包含数字和 + - * / ( ) .")
 
     return errors
 
-messages = [{"role": "user", "content": "7//2"}]
+#用户指令
+messages = [{"role": "user", "content": "100除0"}]
 
 #进行循环对话
 MAX_ROUNDS = 5
 final_answer = None
 round_no = 1
-while round_no < MAX_ROUNDS + 1:
+seen = {}#账本
+
+# ReAct
+while round_no < MAX_ROUNDS + 1:# ReAct
 
     resp = client.chat.completions.create(
         model=MODEL,
@@ -157,6 +166,7 @@ while round_no < MAX_ROUNDS + 1:
     )
     fr = resp.choices[0].finish_reason
     msg = resp.choices[0].message
+
     if fr == "stop":
         final_answer = msg.content
         log.info("round=%d 结束 fr=stop 答案长度=%d", round_no, len(final_answer or ""))
@@ -171,19 +181,22 @@ while round_no < MAX_ROUNDS + 1:
     for tc in msg.tool_calls:
         args = json.loads(tc.function.arguments)#arguments实参
         fn = TOOL_MAP.get(tc.function.name)#查tc.function.name是否在TOOL_MAP中
-
-        if fn is None:
-            result = f"未知工具：{tc.function.name}"
+        fp = f"{tc.function.name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+        if tc.function.name != "get_time" and fp in seen:
+            result = f"重复调用：你刚用相同参数调过 {tc.function.name}，结果见上一条 tool 消息。请换参数，或直接回答。"
         else:
-            errors = validate_args(tc.function.name, args)#模型给args后不进函数，先判断
-            if errors:
-                result = result = "参数校验失败：" + "；".join(errors)
+            if fn is None:
+                result = f"未知工具：{tc.function.name}"
             else:
-                try:
-                    result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
-                except Exception as e:
-                    result = f"工具执行失败：{type(e).__name__}: {e}"
-
+                errors = validate_args(tc.function.name, args)#模型给args后不进函数，先判断
+                if errors:
+                    result = "参数校验失败：" + "；".join(errors)
+                else:
+                    try:
+                        result = fn(**args)#fn首先是函数名，然后**把字典拆成关键字参数
+                    except Exception as e:
+                        result = f"工具执行失败：{type(e).__name__}: {e}"
+            seen[fp] = result
         log.info("round=%d tool=%s args=%s result_len=%d",
                  round_no, tc.function.name, args, len(result))
 
