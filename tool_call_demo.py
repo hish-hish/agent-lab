@@ -7,6 +7,8 @@ import operator
 import re
 
 from json_probe import client,MODEL
+from pathlib import Path
+from docx import Document
 
 #设置info输出
 logging.basicConfig(
@@ -61,8 +63,64 @@ def calculator(expr: str) -> str:
 def get_time() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")#年月日时分秒
 
+_doc_cache = None
+
+def _load_doc() -> dict:
+    """把 38.300 解析成 {条款号: 正文}，只解析一次，结果缓存。
+
+    搬 docx_smoke.py 里那段循环：
+      - 跳过 style 以 "toc" 开头的段落
+      - 遇到 Heading 就记 num（"\t" 前那段）
+      - 其余段落塞进当前 num 的正文列表
+      - 返回 {num: "\n".join(body)}
+    """
+    global _doc_cache
+    if _doc_cache is not None:
+        return _doc_cache
+
+    path = Path(__file__).parent / "data" / "38300-j40.docx"
+    doc = Document(path)
+
+    sections = {}
+    cur = None
+    for p in doc.paragraphs:
+        style = p.style.name
+        text = p.text.strip()
+        if not text:
+            continue
+        if style.startswith("toc"):
+            continue
+        if style.startswith("Heading"):
+            parts = p.text.split("\t")
+            num = parts[0].strip() if len(parts) > 1 else ""
+            if num:
+                cur = num
+                sections[num] = []
+            else:
+                cur = None
+        elif cur is not None:
+            sections[cur].append(p.text)
+
+    _doc_cache = {k: "\n".join(v) for k, v in sections.items()}
+    return _doc_cache
 
 
+def get_doc_section(num: str) -> str:
+    """返回某个条款的正文，最多 2000 字。
+
+    要求：
+    1. 从 _load_doc() 拿字典，按 num 取
+    2. 取不到 → raise ValueError（让错误回填机制处理）
+    3. 超过 2000 字 → 截断，末尾加 "…（已截断，原长 N 字）"
+    """
+    doc = _load_doc()
+    if num not in doc:
+        raise ValueError(f"没有「{num}」这一节，可查的编号如 4.7 / 5.3.5")
+
+    body = doc[num]
+    if len(body) > 800:
+        body = body[:800] + f"…（已截断，原长 {len(body)} 字）"
+    return body
 
 #用文字给模型写一份说明书，模型按name，description，parameters生成数据，再dispatch这个name的函数
 TOOLS = [{
@@ -105,6 +163,17 @@ TOOLS = [{
             "properties": {},#有输入才描述
             "required": [],
         "strict": True
+},},},
+{
+    "type": "function",#声明是函数
+    "function":{
+        "name": "get_doc_section",
+        "description":"用户想要某章节的文段",#判断什么时候调用
+        "parameters": {
+            "type": "object",
+            "properties": {"num": {"type": "string", "description": "用户输入的章节号，类似1.1"}},#有输入才描述
+            "required": ["num"],
+        "strict": True
 },},}
 ]
 
@@ -112,6 +181,7 @@ TOOL_MAP = {
     "get_weather": get_weather,
     "calculator": calculator,
     "get_time": get_time,
+    "get_doc_section": get_doc_section,
 }
 
 
@@ -142,13 +212,13 @@ def validate_args(tool_name: str, args: dict) -> list[str]:
     return errors
 
 #用户指令
-messages = [{"role": "user", "content": "100除0"}]
+messages = [{"role": "user", "content": "5.3.5.1"}]
 
 #进行循环对话
 MAX_ROUNDS = 5
 final_answer = None
 round_no = 1
-seen = {}#账本
+seen = {}#账本 用来记录之前是否问过
 
 # ReAct
 while round_no < MAX_ROUNDS + 1:# ReAct
@@ -164,6 +234,7 @@ while round_no < MAX_ROUNDS + 1:# ReAct
         temperature=0,
         max_tokens=1500
     )
+    log.info("round=%d prompt_tokens=%d total=%d", round_no, resp.usage.prompt_tokens, resp.usage.total_tokens)
     fr = resp.choices[0].finish_reason
     msg = resp.choices[0].message
 
