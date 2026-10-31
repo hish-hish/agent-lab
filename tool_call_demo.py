@@ -119,8 +119,8 @@ def get_doc_section(num: str) -> str:
         raise ValueError(f"没有「{num}」这一节，可查的编号如 4.7 / 5.3.5")
 
     body = doc[num]
-    if len(body) > 800:
-        body = body[:800] + f"…（已截断，原长 {len(body)} 字）"
+    if len(body) > 2000:
+        body = body[:2000] + f"…（已截断，原长 {len(body)} 字）"
     return body
 
 #用文字给模型写一份说明书，模型按name，description，parameters生成数据，再dispatch这个name的函数
@@ -306,7 +306,8 @@ def run_agent(question: str) -> dict:
     return {
             "ok": final_answer is not None,
             "answer": final_answer,
-            "rounds": MAX_ROUNDS if final_answer is None else round_no,
+            "rounds": round_no,
+            "reason": "stop" if final_answer else "no_answer",
         }
 
 if __name__ == "__main__":
