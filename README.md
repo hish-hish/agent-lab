@@ -19,6 +19,7 @@
 
 需要一台装了 [uv](https://docs.astral.sh/uv/) 的机器。Python 不用单独装，uv 会自己下载。
 
+
 ```bash
 git clone https://github.com/hish-hish/agent-lab
 cd agent-lab
@@ -37,6 +38,16 @@ uv run python tool_call_demo.py     # Function Calling 三工具
 ```
 
 Windows 下如果中文输出乱码，先执行 `$env:PYTHONUTF8=1`。
+
+## 关于 3GPP 文档
+
+`get_doc_section(num)` 需要本地放一份 3GPP 规范文件，路径固定为：data/38300-j40.docx
+
+**获取方式**：打开 https://www.3gpp.org/ftp/Specs/archive/38_series/38.300/ ，下载最新的 `38300-XX0.zip`，解压出 `.docx`，改名为 `38300-j40.docx` 放进 `data/`。
+
+**没有这个文件会怎样**：其他三个工具（天气 / 计算器 / 时间）完全正常；只有 `get_doc_section` 会返回一条错误信息，模型会如实告诉用户"找不到文件"，不会崩溃，也不会编造条款内容。
+
+> 3GPP 文档有版权且体积较大（约 2MB），未随仓库分发。
 
 ## 现在能做什么
 
