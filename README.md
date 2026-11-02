@@ -6,7 +6,7 @@
 
 ## 这是什么
 
-8 天的实验记录，覆盖四块：
+13 天的实验记录，覆盖四块能力，外加一套 20 题评测集：
 
 | 主题 | 做了什么 | 结果 |
 |---|---|---|
@@ -42,12 +42,13 @@ Windows 下如果中文输出乱码，先执行 `$env:PYTHONUTF8=1`。
 
 **Function Calling**（`tool_call_demo.py`）
 
-- 三个工具：`get_weather(city)` / `calculator(expr)` / `get_time()`
+- 四个工具：`get_weather(city)` / `calculator(expr)` / `get_time()` / `get_doc_section(num)`（从 TS 38.300 按条款号取正文，模块级缓存只解析一次）
 - 分发表按 `name` 查函数（白名单，不用 `globals()`）
 - 一轮可以调多个工具，每个工单各回填一条带 `tool_call_id` 的 `role="tool"` 消息
 - 参数校验前置：不执行就能判断的错误在校验层拦下，必须执行才知道的错误（如 `7//2`、除零）在函数内 `raise`
 - 工具异常**不往上抛**，转成错误文本回填 —— 模型能读懂并自我修正
 - 循环三个出口：`stop` / 非 `tool_calls`（`length` 等）/ 达到 `MAX_ROUNDS`
+- 上下文裁剪：单条工具结果截断 800 字，末尾标注「（已截断，原长 N 字）」——模型据此承认内容不完整
 
 **结构化输出**（`ask_json.py`）
 
@@ -61,6 +62,22 @@ Windows 下如果中文输出乱码，先执行 `$env:PYTHONUTF8=1`。
 - 过滤 617 条目录项；章节号就在 `text` 里（`"4.3.1\tNG Interface"`）
 - 结构自洽性检验：编号的点数 = `level - 1`
 
+## 评测结果
+
+**完成率**（`run_batch.py`，同一问题连跑 10 次）
+
+10/10，平均 2.00 轮，平均 1.55s
+
+**准确率**（`evals/`，20 题 / 7 类）
+
+总分：20/20
+  单工具 3/3 · 多工具 2/2 · 长文档 3/3 · 异常边界 3/3 · 跨节推理 3/3 · 计算 3/3 · 拒答 3/3
+
+文档题条款引用率：`§x.y.z` 格式 **6/6 = 100%**
+
+> ⚠️ 这是开发集：题目和判分标准都经过一轮修正（首轮 17/20，逐题归因发现 2 处判分误杀），
+> 不能当作泛化准确率。详见[掘金：Agent 100% 答对，但真的准吗？](https://juejin.cn/post/7703392852436631606)。
+
 ## 文件说明
 
 | 文件 | 干什么 |
@@ -72,13 +89,18 @@ Windows 下如果中文输出乱码，先执行 `$env:PYTHONUTF8=1`。
 | `format_probe.py` | `response_format` 能力探测（`json_object` 可用 / `json_schema` 不可用） |
 | `repair_probe.py` | 清洗 + 重试能救回多少（基线 0/10、只清洗 0/10、清洗+重试 10/10） |
 | `ask_json.py` | 上面几件事封装成一个函数，并跑 20 次统计成功率 |
-| `tool_call_demo.py` | 手写 Function Calling：三工具、分发表、参数校验、错误回填、三出口循环 |
+| `tool_call_demo.py` | 手写 Function Calling：四工具、分发表、参数校验、错误回填、三出口循环、重复检测、上下文截断 |
 | `docx_smoke.py` | 3GPP docx 解析冒烟测试（探结构、切节、验编号） |
+| `run_batch.py` | 稳定性跑批：同一问题跑 N 次，统计成功率 / 平均轮数 / 耗时 |
+| `evals/cases.py` | 20 题评测集（7 类，每题带 `must_contain` 关键词） |
+| `evals/run_eval.py` | 评测跑批：总分 + 分类分 + 引用率 + 错题清单 |
 
 ## 文档
 
 - [`docs/openai-response-structure.md`](docs/openai-response-structure.md) —— 响应结构速查（非流式 / 流式 / `finish_reason` 全取值 / 常用访问路径）
 - [`docs/mcp-architecture.md`](docs/mcp-architecture.md) —— MCP 架构笔记（三角色、两层、三类原语，以及与 Function Call 的分层关系）
+- [`docs/react-design.md`](docs/react-design.md) —— ReAct 状态机设计（四状态、三出口、重复检测规则）
+- [`docs/blog/eval-harder-than-dev.md`](docs/blog/eval-harder-than-dev.md) —— 博客：我的 Agent 答对了 100%，但我不敢说它准
 
 ## 几个已验证的服务端能力边界
 
