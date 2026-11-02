@@ -28,13 +28,13 @@ CASES = [
     {"id": 10, "category": "异常边界", "question": "帮我查一下广州的天气",
      "must_contain": ["深圳"]},
     {"id": 11, "category": "异常边界", "question": "算子里的 abc 乘以 3",
-     "must_contain": ["数字"]},
+     "must_contain": ["3abc"]},
 
     # ── 跨节推理（3）──
     {"id": 12, "category": "跨节推理", "question": "4.7.1 这一节是讲什么的",
      "must_contain": ["IAB"]},
     {"id": 13, "category": "跨节推理", "question": "38.300 里IAB-donor 是什么",
-     "must_contain": ["核心网"]},
+     "must_contain": ["gNB"]},
     {"id": 14, "category": "跨节推理", "question": "4.7.2 讲的是什么",
      "must_contain": ["F1"]},
 

@@ -2,6 +2,7 @@
 import logging
 import sys
 from pathlib import Path
+import re
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -48,6 +49,26 @@ for x in results:
 for cat, oks in by_cat.items():
     print(f"  {cat:6s} {sum(oks)}/{len(oks)}")
 
+
+#引用统计
+CITE = re.compile(r"§\s*\d+(?:\.\d+)+")                    # §4.7.1
+NUM  = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?![\d.])")     # 4.7.1（不带 §）
+
+strong = sum(1 for x in results if CITE.search(x["answer"] or ""))
+weak   = sum(1 for x in results
+             if not CITE.search(x["answer"] or "")
+             and NUM.search(x["answer"] or ""))
+
+doc_cases = [x for x in results if x["case"]["category"] in ("长文档", "跨节推理")]
+strong_doc = sum(1 for x in doc_cases if CITE.search(x["answer"] or ""))
+
+n_all = len(results)
+n_doc = len(doc_cases)
+print(f"\n引用情况：")
+print(f"  文档题带 §：      {strong_doc}/{n_doc} = {strong_doc/n_doc*100:.0f}%")
+print(f"  全部 {n_all} 题带 §：  {strong}/{n_all} = {strong/n_all*100:.0f}%")
+print(f"  全部 {n_all} 题只有数字编号：{weak}/{n_all}")
+
 #错题清单
 # 错题清单
 wrong = [x for x in results if not x["ok"]]
@@ -60,4 +81,5 @@ else:
         ans = (x["answer"] or "（无答案）")
         print(f'  #{c["id"]} {c["question"][:26]}')
         print(f'     需要: {c["must_contain"]}')
-        print(f'     实际: {ans}[:100]')
+        print(f'     实际: {ans[:100]}')
+

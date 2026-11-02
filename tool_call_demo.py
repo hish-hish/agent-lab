@@ -233,7 +233,11 @@ def _create_with_retry(**kwargs):
 
 def run_agent(question: str) -> dict:
     # 用户指令
-    messages = [{"role": "user", "content": question}]
+    messages = [{"role": "system", "content": (
+            "回答涉及 3GPP 规范内容（例如 TS 38.300 的章节）时，"
+            "必须在答案中标注条款号，格式为 §4.7.1。"
+            "不要只写「第 4.7.1 节」或「4.7.1 节」，要写成 §4.7.1。"
+        )},{"role": "user", "content": question}]
 
     # 进行循环对话
     MAX_ROUNDS = 5
