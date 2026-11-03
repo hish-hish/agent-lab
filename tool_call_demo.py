@@ -10,6 +10,7 @@ from json_probe import client,MODEL
 from pathlib import Path
 from docx import Document
 from openai import APITimeoutError, APIConnectionError, InternalServerError, RateLimitError
+from rag.bm25 import build_index as _build_index, search as _bm25_search
 
 #设置info输出
 logging.basicConfig(
@@ -123,6 +124,54 @@ def get_doc_section(num: str) -> str:
         body = body[:2000] + f"…（已截断，原长 {len(body)} 字）"
     return body
 
+# ============ RAG 检索 ============
+_rag_index = None
+
+
+def _load_rag():
+    """懒加载：第一次调用才读 corpus.json 并建索引（1–2 秒）。"""
+    global _rag_index
+    if _rag_index is None:
+        corpus = json.loads(
+            (Path(__file__).parent / "rag" / "corpus.json").read_text(encoding="utf-8")
+        )
+        _rag_index = _build_index(corpus)
+        log.info("RAG 索引已加载：%d 块", len(_rag_index[0]))
+    return _rag_index
+
+
+def _to_english(query: str) -> str:
+    """把中文问题转成英文检索关键词。语料是英文，直接拿中文搜一个词都匹配不上。"""
+    resp = _create_with_retry(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": (
+                "把用户的问题转成用于检索英文技术文档的关键词。"
+                "只输出关键词，用空格分隔，不要解释，不要标点。"
+                "问题里的英文专有名词（如 IAB-MT、F1、NG-RAN）必须原样保留在输出里。"
+            )},
+            {"role": "user", "content": query},
+        ],
+        reasoning_effort="none",
+        temperature=0,
+        max_tokens=60,
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+
+def search_docs(query: str) -> str:
+    """按关键词检索 3GPP 正文，返回 top-3 段落，每段带 §条款号。"""
+    docs, df, avg_len = _load_rag()
+    en = _to_english(query)
+    hits = _bm25_search(en, docs, df, avg_len, top_k=3)
+    log.info("search_docs query=%r en=%r hits=%d", query, en, len(hits))
+
+    if not hits:
+        return f"检索不到相关段落（检索词：{en}）。"
+
+    blocks = [f'【§{h["num"]} {h["title"]}】\n{h["text"]}' for h in hits]
+    return f"（检索词：{en}）\n\n" + "\n\n".join(blocks)
+
 #用文字给模型写一份说明书，模型按name，description，parameters生成数据，再dispatch这个name的函数
 TOOLS = [{
     "type": "function",#声明是函数
@@ -130,7 +179,7 @@ TOOLS = [{
         "name": "get_weather",
         "description":"用户问某城市天气如何",#判断什么时候调用
         "parameters": {
-            "type": "object",
+            "type": "object",#代表是一个对象，对应dict
             "properties": {
             "city": {"type": "string", "description": "城市名，中文"}
             },
@@ -175,6 +224,17 @@ TOOLS = [{
             "properties": {"num": {"type": "string", "description": "用户输入的章节号，类似1.1"}},#有输入才描述
             "required": ["num"],
         "strict": True
+},},},
+{
+    "type": "function",
+    "function":{
+        "name": "search_docs",
+        "description":"按关键词检索 3GPP 规范正文。用户询问概念、术语、功能、流程，但没有给出具体章节号时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "用户的问题或关键词，用中文即可"}},
+            "required": ["query"],
+        "strict": True
 },},}
 ]
 
@@ -183,6 +243,7 @@ TOOL_MAP = {
     "calculator": calculator,
     "get_time": get_time,
     "get_doc_section": get_doc_section,
+    "search_docs": search_docs,
 }
 
 
@@ -200,6 +261,12 @@ def validate_args(tool_name: str, args: dict) -> list[str]:
 
         elif city not in _WEATHER:
             errors.append(f"没有「{city}」的天气数据，可查询：{'、'.join(_WEATHER)}")
+
+    if tool_name == "search_docs":
+        q = (args.get("query") or "").strip()
+        args["query"] = q
+        if not q:
+            errors.append("缺少 query 参数")
 
     if tool_name == "calculator":
         expr = (args.get("expr") or "").strip()
@@ -237,6 +304,8 @@ def run_agent(question: str) -> dict:
             "回答涉及 3GPP 规范内容（例如 TS 38.300 的章节）时，"
             "必须在答案中标注条款号，格式为 §4.7.1。"
             "不要只写「第 4.7.1 节」或「4.7.1 节」，要写成 §4.7.1。"
+            "用户给出具体章节号（如 4.7.1）时用 get_doc_section；"
+            "用户只问概念、术语或功能（没有章节号）时用 search_docs 检索。"
         )},{"role": "user", "content": question}]
 
     # 进行循环对话
@@ -315,7 +384,7 @@ def run_agent(question: str) -> dict:
         }
 
 if __name__ == "__main__":
-    result = run_agent("北京天气怎么样")
+    result = run_agent("SPID 的取值范围和映射规则")
     print(result)
 
 

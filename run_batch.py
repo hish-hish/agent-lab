@@ -1,3 +1,4 @@
+#检验模型完成率
 import time
 import logging
 

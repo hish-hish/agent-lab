@@ -22,3 +22,5 @@ data/
 # 临时解析产物
 4.7_excerpt.md
 *_excerpt.md
+
+rag/corpus.json
