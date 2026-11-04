@@ -24,7 +24,7 @@ def build_index(chunks: list[dict]):
     df = Counter()          # df[词] = 这个词出现在多少个块里
     total_len = 0
     for c in chunks:
-        toks = tokenize(c["text"])
+        toks = tokenize(f'{c["num"]} {c["title"]} {c["text"]}')
         tf = Counter(toks)  # tf[词] = 这个块里出现几次
         docs.append({"chunk": c, "tf": tf, "len": len(toks)})
         for t in tf:

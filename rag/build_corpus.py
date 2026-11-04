@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 
 from docx import Document
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+
 
 DOC_PATH = Path(__file__).parent.parent / "data" / "38300-j40.docx"
 OUT_PATH = Path(__file__).parent / "corpus.json"
@@ -99,39 +102,67 @@ def make_chunks(sections: list[dict]) -> list[dict]:
     return chunks
 
 
-def load_tables() -> list[dict]:
-    """导出所有表格，超过 MAX_CHUNK 的按行切块，每块带上表头。"""
+def load_tables_with_section() -> list[dict]:
+    """导出所有表格，num 用表格所在的章节号（不再是 table-N）。"""
     doc = Document(DOC_PATH)
     tables = []
-    for i, table in enumerate(doc.tables, start=1):
-        rows = []
-        for row in table.rows:
-            cells = [c.text.strip().replace("\n", " ") for c in row.cells]
-            rows.append(" | ".join(cells))
-        if not rows:
-            continue
-        header = rows[0]
-        if "Change history" in header:
-            continue
-        body_rows = rows[1:] if len(rows) > 1 else rows
+    cur_num = None                      # 当前所在的章节号
 
-        cur, cur_len, part = [], len(header) + 1, 1
-        for r in body_rows:
-            if cur and cur_len + len(r) + 1 > MAX_CHUNK:
+    for child in doc.element.body.iterchildren():
+        tag = child.tag
+
+        # ── 是段落：只关心 Heading，用来更新 cur_num ──
+        if tag.endswith("}p"):
+            p = Paragraph(child, doc)
+            if not p.style.name.startswith("Heading"):
+                continue
+            text = p.text.strip()
+            if not text:
+                continue
+            parts = p.text.split("\t")
+            if len(parts) > 1:
+                cur_num = parts[0].strip()                     # 普通节：4.7.1
+            elif text.startswith("Annex"):
+                head = text.split("\n")[0]                     # "Annex A (informative):"
+                cur_num = head.split("(")[0].strip().rstrip(":").strip()
+            else:
+                cur_num = None                                 # 无编号（Foreword）
+
+        # ── 是表格：挂到 cur_num 上 ──
+        elif tag.endswith("}tbl"):
+            if cur_num is None:                                # 还没进任何一节
+                continue
+            t = Table(child, doc)
+            rows = []
+            for row in t.rows:
+                cells = [c.text.strip().replace("\n", " ") for c in row.cells]
+                rows.append(" | ".join(cells))
+            if not rows:
+                continue
+
+            header = rows[0]
+            if "Change history" in header:                     # 变更历史表跳过
+                continue
+            body_rows = rows[1:] if len(rows) > 1 else rows
+
+            cur, cur_len, part = [], len(header) + 1, 1
+            for r in body_rows:
+                if cur and cur_len + len(r) + 1 > MAX_CHUNK:
+                    tables.append({
+                        "num": cur_num,
+                        "title": f"表格 (part {part})",
+                        "text": "\n".join([header] + cur),
+                    })
+                    part, cur, cur_len = part + 1, [], len(header) + 1
+                cur.append(r)
+                cur_len += len(r) + 1
+            if cur:
                 tables.append({
-                    "num": f"table-{i}",
+                    "num": cur_num,
                     "title": f"表格 (part {part})",
                     "text": "\n".join([header] + cur),
                 })
-                part, cur, cur_len = part + 1, [], 0
-            cur.append(r)
-            cur_len += len(r) + 1
-        if cur:
-            tables.append({
-                "num": f"table-{i}",
-                "title": f"表格 (part {part})",
-                "text": "\n".join([header] + cur),
-            })
+
     return tables
 
 
@@ -140,7 +171,7 @@ if __name__ == "__main__":
     print("原始节数:", len(sections))
 
     chunks = make_chunks(sections)
-    tables = load_tables()
+    tables = load_tables_with_section()
     all_chunks = chunks + tables
 
     OUT_PATH.write_text(

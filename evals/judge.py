@@ -7,12 +7,12 @@ def judge(case, answer) -> bool:
     if answer is None:
         return False
 
-    text = answer.lower()
+    text = answer.lower().replace("_", "")
 
     if case["category"] == "拒答":
         return any(w in text for w in REFUSE_WORDS)
 
-    return all(kw.lower() in text for kw in case["must_contain"])
+    return all(kw.lower().replace("_", "") in text for kw in case["must_contain"])
 
 if __name__ == "__main__":
     cases = [

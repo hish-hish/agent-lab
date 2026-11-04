@@ -82,5 +82,5 @@ else:
         ans = (x["answer"] or "（无答案）")
         print(f'  #{c["id"]} {c["question"][:26]}')
         print(f'     需要: {c["must_contain"]}')
-        print(f'     实际: {ans[:100]}')
+        print(f'     实际: {ans[:1500]}')
 

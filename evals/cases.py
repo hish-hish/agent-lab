@@ -53,4 +53,12 @@ CASES = [
      "must_contain": []},
     {"id": 20, "category": "拒答", "question": "100 除以 0 等于几",
      "must_contain": []},
+
+    # ── 表格（3）──
+    {"id": 21, "category": "表格", "question": "Annex G 里 Mobility Latency 由哪几部分组成",
+     "must_contain": ["TRRC", "TDL-sync"]},
+    {"id": 22, "category": "表格", "question": "Annex F 里 I-RNTI 有哪几种 profile 编码",
+     "must_contain": ["0b00", "0b11"]},
+    {"id": 23, "category": "表格", "question": "Annex C 里的 reference profiles 表，节点地址索引大概能表示多少个值",
+     "must_contain": ["1 million"]},
 ]
