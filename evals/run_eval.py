@@ -11,7 +11,7 @@ from tool_call_demo import run_agent
 from cases import CASES
 from judge import judge
 
-logging.getLogger().setLevel(logging.ERROR)      # ← 必须在 import 之后
+logging.getLogger().setLevel(logging.INFO)      # ← 必须在 import 之后
 
 results = []
 for case in CASES:

@@ -158,18 +158,87 @@ def _to_english(query: str) -> str:
     )
     return (resp.choices[0].message.content or "").strip()
 
+#级间聚合
+MAX_AGG_CHARS = 2500     # 聚合后总字符上限
+MAX_AGG_SECTIONS = 2      # 最多聚合几个节
+
+
+def _expand_by_section(hits: list[dict], corpus: list[dict]) -> list[dict]:
+    # 进：hits   = BM25 返回的 [{score, num, title, text}, ...]（top-3，按分数降序）
+    #      corpus = 全部 1406 块 [{num, title, text}, ...]
+    # 出：[{num, title, text}, ...]  —— 聚合后的块列表
+    # 硬约束：
+    #   1. hits 里的块一定保留，而且排在前面
+    #   2. 只聚合 hits 所属的节，最多 MAX_AGG_SECTIONS 个（按 hits 里首次出现的顺序）
+    #   3. 同一节内：表格块（title 以 "表格" 开头）优先于其他正文块
+    #   4. 各块 text 长度之和不超过 MAX_AGG_CHARS；超了就不再加（但继续看后面的短块）
+
+    menu_list = []
+    for h in hits:
+        if h["num"] not in menu_list:
+            if len(menu_list) < MAX_AGG_SECTIONS:
+                menu_list.append(h["num"])
+
+    result = []
+    old_str = 0
+    old_key = set()
+    for h in hits:
+        if h["num"] in menu_list:
+            result.append(h)
+            old_str += len(h["text"])
+            old_key.add((h["num"],h["title"]))
+
+    for num in menu_list:
+        local_chunk = []
+        for c in corpus:
+            if c["num"] == num:
+                local_chunk.append(c)
+
+        table_chunk = []
+        other_chunk = []
+        for b in local_chunk:
+            if b ["title"].startswith("表格"):
+                table_chunk.append(b)
+            else:
+                other_chunk.append(b)
+
+        for b in table_chunk:
+            if (b["num"], b["title"]) in old_key:
+                continue
+            if old_str + len(b["text"]) > MAX_AGG_CHARS:
+                continue
+            result.append(b)
+            old_str += len(b["text"])
+            old_key.add((b["num"],b["title"]))
+
+        for b in other_chunk:
+            if (b["num"], b["title"]) in old_key:
+                continue
+            if old_str + len(b["text"]) > MAX_AGG_CHARS:
+                continue
+            result.append(b)
+            old_str += len(b["text"])
+            old_key.add((b["num"],b["title"]))
+    return result
+
 
 def search_docs(query: str) -> str:
     """按关键词检索 3GPP 正文，返回 top-3 段落，每段带 §条款号。"""
     docs, df, avg_len = _load_rag()
     en = _to_english(query)
     hits = _bm25_search(en, docs, df, avg_len, top_k=3)
-    log.info("search_docs query=%r en=%r hits=%d", query, en, len(hits))
 
     if not hits:
         return f"检索不到相关段落（检索词：{en}）。"
 
-    blocks = [f'【§{h["num"]} {h["title"]}】\n{h["text"]}' for h in hits]
+    corpus = [d["chunk"] for d in docs]
+    expanded = _expand_by_section(hits, corpus)
+    log.info(
+        "search_docs query=%r en=%r hits=%d 聚合后=%d 块/%d 字符",
+        query, en, len(hits), len(expanded), sum(len(b["text"]) for b in expanded),
+    )
+
+    blocks = [f'【§{b["num"]} {b["title"]}】\n{b["text"]}' for b in expanded]
     return f"（检索词：{en}）\n\n" + "\n\n".join(blocks)
 
 #用文字给模型写一份说明书，模型按name，description，parameters生成数据，再dispatch这个name的函数
