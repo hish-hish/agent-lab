@@ -27,7 +27,7 @@ CASES = [
      "must_contain": ["上海"]},
     {"id": 10, "category": "异常边界", "question": "帮我查一下广州的天气",
      "must_contain": ["深圳"]},
-    {"id": 11, "category": "异常边界", "question": "算子里的 abc 乘以 3",
+    {"id": 11, "category": "异常边界", "question": "把 abc 乘以 3 化简成代数式",
      "must_contain": ["3abc"]},
 
     # ── 跨节推理（3）──
@@ -61,4 +61,7 @@ CASES = [
      "must_contain": ["0b00", "0b11"]},
     {"id": 23, "category": "表格", "question": "Annex C 里的 reference profiles 表，节点地址索引大概能表示多少个值",
      "must_contain": ["1 million"]},
+
+    {"id": 24, "category": "拒答", "question": "38.300 里有没有规定基站的安装步骤",
+     "must_contain": []},
 ]

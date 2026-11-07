@@ -106,23 +106,55 @@ def _load_doc() -> dict:
     _doc_cache = {k: "\n".join(v) for k, v in sections.items()}
     return _doc_cache
 
+#输入归一化
+_rag_corpus = None
+
+def _load_corpus() -> list[dict]:
+    """读 rag/corpus.json，只读一次。
+    出：[{num, title, text}, ...]（1406 个）
+    """
+    global _rag_corpus
+    if _rag_corpus is not None:
+        return _rag_corpus
+    _rag_corpus = json.loads(
+        (Path(__file__).parent / "rag" / "corpus.json").read_text(encoding="utf-8")
+    )
+    return _rag_corpus
+
+
+
+def _normalize_num(num: str) -> str:
+    """把用户/模型的写法归一化成 corpus 里的写法。
+    进："4.7.1" / "Annex G" / "G" / "annex g"
+    出："4.7.1" / "Annex G" / "Annex G" / "Annex G"
+    """
+    num = num.strip()
+    if not num:
+        return ""
+    if num.lower().startswith("annex"):
+        return f"Annex {num[-1].upper()}"
+    if num[0].isdigit():
+        return num
+    if len(num) == 1 and num[0].isalpha():
+        return f"Annex {num[0].upper()}"
+    return num
 
 def get_doc_section(num: str) -> str:
-    """返回某个条款的正文，最多 2000 字。
+    """返回某一节的全部内容（同 num 的块按顺序拼起来），最多 2000 字。"""
+    stand_num = _normalize_num(num)
+    corpus = _load_corpus()
+    chunk = []
+    for c in corpus:
+        if c["num"] == stand_num:
+            chunk.append(c)
+    if not chunk:
+        raise ValueError(f"没有{num}这一节，可查的编号如 4.7.1 或 Annex G")
+    text = "\n\n".join(b["text"] for b in chunk)
+    if len(text) > 2000:
+        text = text[:2000] + f"...(已截断，原长{len(text)}字)"
+    return text
 
-    要求：
-    1. 从 _load_doc() 拿字典，按 num 取
-    2. 取不到 → raise ValueError（让错误回填机制处理）
-    3. 超过 2000 字 → 截断，末尾加 "…（已截断，原长 N 字）"
-    """
-    doc = _load_doc()
-    if num not in doc:
-        raise ValueError(f"没有「{num}」这一节，可查的编号如 4.7 / 5.3.5")
 
-    body = doc[num]
-    if len(body) > 2000:
-        body = body[:2000] + f"…（已截断，原长 {len(body)} 字）"
-    return body
 
 # ============ RAG 检索 ============
 _rag_index = None
@@ -149,6 +181,7 @@ def _to_english(query: str) -> str:
                 "把用户的问题转成用于检索英文技术文档的关键词。"
                 "只输出关键词，用空格分隔，不要解释，不要标点。"
                 "问题里的英文专有名词（如 IAB-MT、F1、NG-RAN）必须原样保留在输出里。"
+                "只翻译问题里出现的词，不要补充问题里没有的专业术语。"
             )},
             {"role": "user", "content": query},
         ],
@@ -287,10 +320,10 @@ TOOLS = [{
     "type": "function",#声明是函数
     "function":{
         "name": "get_doc_section",
-        "description":"用户想要某章节的文段",#判断什么时候调用
+        "description":"按编号取 3GPP 规范的某一节全文。支持正文条款号（如 4.7.1）和附录号（如 Annex G）。",#判断什么时候调用
         "parameters": {
             "type": "object",
-            "properties": {"num": {"type": "string", "description": "用户输入的章节号，类似1.1"}},#有输入才描述
+            "properties": {"num": {"type": "string", "description": "章节号或附录号，例如 4.7.1、5.3.5、Annex G、Annex D"}},#有输入才描述
             "required": ["num"],
         "strict": True
 },},},
@@ -453,7 +486,7 @@ def run_agent(question: str) -> dict:
         }
 
 if __name__ == "__main__":
-    result = run_agent("SPID 的取值范围和映射规则")
+    result = run_agent("给我看看annexg")
     print(result)
 
 

@@ -52,7 +52,7 @@ for cat, oks in by_cat.items():
 
 
 #引用统计
-CITE = re.compile(r"§\s*\d+(?:\.\d+)+")                    # §4.7.1
+CITE = re.compile(r"§\s*\d+(?:\.\d+)+|Annex\s+[A-H]\b|Table\s+[A-H]-\d+")# §4.7.1
 NUM  = re.compile(r"(?<![\d.])\d+(?:\.\d+)+(?![\d.])")     # 4.7.1（不带 §）
 
 strong = sum(1 for x in results if CITE.search(x["answer"] or ""))
