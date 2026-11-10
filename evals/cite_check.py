@@ -17,7 +17,7 @@ STOP = {
     "fig", "table", "figure","gpp", "xx", "xxx", "etc", "eg", "ie",
 }
 
-MAX_ANCHOR_DF = 30          # 锚点最多出现在多少个块里，超过就算"太泛"
+MAX_ANCHOR_DF = 100          # 锚点最多出现在多少个块里，超过就算"太泛"
 _lower_cache = None
 
 
@@ -31,39 +31,91 @@ def _lower_texts(corpus: list[dict]) -> list[str]:
         _lower_cache = [c["text"].lower() for c in corpus]
     return _lower_cache
 
+def _is_list_line(line: str) -> bool:
+    """判断这一行是不是"列表项"（bullet、序号标题、加粗小标题）。"""
+    s = line.lstrip()
+    if s.startswith(("-", "*", "•", "+")):
+        return True
+    if re.match(r"^\d+[.、)]", s):
+        return True
+    if s.startswith("**") and s.endswith("**"):
+        return True
+    return False
+
+
 def split_claims(answer: str) -> list[dict]:
     """把答案拆成"带引用的断言"。
-    进：答案全文（可能 500–1500 字，含中文、markdown、表格）
-    出：[{"claim": "那句话", "cites": ["§4.7.1", "Annex G"]}, ...]
-       只保留"至少带一个引用"的那些句子
-    约束：
-      1. 按句号、问号、换行、竖线切（markdown 表格用 |）
-      2. 一个句子里有多个引用 → 全收进 cites
-      3. 句子里没有引用 → 丢掉（这次只核验"有引用的"）
-      4. 句子里没有中文/英文实词（纯符号）→ 丢掉
+
+    进：答案全文（含中文、markdown、表格）
+    出：[{"claim": "...", "cites": ["§4.7.1", ...]}, ...]
+
+    处理顺序（顺序错了会前功尽弃）：
+      ① 按行切、去空行
+      ② 合并"引导句 + 紧随其后的列表项"
+           —— 列表项自己不带引用，引用写在引导句上，
+              所以它们必须并进同一条断言，否则引用和内容是断开的
+      ③ 没被合并的行，才按 。？ 切句
+           —— 被合并的整条不再切，否则又散开
+      ④ 只留"带引用且长度 ≥ 8"的条目
     """
-    line_list = answer.split("\n")
-    sentence_list = []
-    for line in line_list:
+    # ① 按行切，去掉空行
+    raw_lines = []
+    for line in answer.split("\n"):
         line = line.strip()
+        if line:
+            raw_lines.append(line)
+
+    # ② 合并引导句 + 后续列表项
+    units = []                      # 元素：(文本, 是否已合并)
+    i = 0
+    while i < len(raw_lines):
+        cur = raw_lines[i]
+
+        if cur.endswith(("：", ":")):
+            j = i + 1
+            bullets = []
+            while j < len(raw_lines) and _is_list_line(raw_lines[j]):
+                text = raw_lines[j]
+                for mark in ("-", "*", "•", "+"):
+                    text = text.lstrip(mark).strip()
+                bullets.append(text)
+                j += 1
+            if bullets:
+                units.append((cur + " " + "；".join(bullets), True))
+                i = j
+                continue
+
+        units.append((cur, False))
+        i += 1
+
+    # ③ 未合并的才按 。？ 切句
+    sentence_list = []
+    for text, is_merged in units:
+        if is_merged:
+            sentence_list.append(text)
+            continue
+
         sentence = ""
-        for s in line:
-            if s in "。？":
-                sentence_list.append(sentence)
+        for ch in text:
+            if ch in "。？":
+                if sentence.strip():
+                    sentence_list.append(sentence.strip())
                 sentence = ""
             else:
-                sentence += s
-        if sentence:
-            sentence_list.append(sentence)
+                sentence += ch
+        if sentence.strip():
+            sentence_list.append(sentence.strip())
 
+    # ④ 只留带引用的
     result = []
     for sentence in sentence_list:
-        index_list = CITE_ANY.findall(sentence)
-        if not index_list:
+        cites = CITE_ANY.findall(sentence)
+        if not cites:
             continue
-        if len(sentence.strip()) < 8:
+        if len(sentence) < 8:
             continue
-        result.append({"claim": sentence.strip(), "cites": index_list,})
+        result.append({"claim": sentence, "cites": cites})
+
     return result
 
 def extract_anchors(claim: str, corpus: list[dict] | None = None) -> list[str]:
@@ -97,12 +149,13 @@ def extract_anchors(claim: str, corpus: list[dict] | None = None) -> list[str]:
         kept = []
         for a in mark:
             df = sum(1 for t in lower_texts if a.lower() in t)
+            print(f"      [df] {a:<18} {df}")
             if df <= MAX_ANCHOR_DF:
                 kept.append(a)
         mark = kept
 
     mark.sort(key=len, reverse=True)
-    return mark[:3]
+    return mark[:6]
 
 
 def _result(claim: dict, anchors: list[str], supported: bool,
@@ -200,77 +253,94 @@ def verify_claim(claim: dict, corpus: list[dict]) -> dict:
     return _result(claim, anchors, False, None, "no_match")
 
 
-if __name__ == "__main__":
-    import logging
-    import sys
-    from pathlib import Path
+# if __name__ == "__main__":
+#     import logging
+#     import sys
+#     from pathlib import Path
+#
+#     sys.path.insert(0, str(Path(__file__).parent.parent))
+#     logging.getLogger().setLevel(logging.WARNING)
+#
+#     from tool_call_demo import _load_corpus, run_agent
+#     from cases import CASES
+#
+#     corpus = _load_corpus()
+#     print(f"语料：{len(corpus)} 块\n")
+#
+#     all_claims = []
+#     for case in CASES:
+#         r = run_agent(case["question"])
+#         answer = r["answer"] or ""
+#         claims = split_claims(answer)
+#         for c in claims:
+#             v = verify_claim(c, corpus)
+#             v["case_id"] = case["id"]
+#             v["question"] = case["question"]
+#             all_claims.append(v)
+#         print(f'#{case["id"]:2d}  断言 {len(claims)} 条')
+#
+#     total = len(all_claims)
+#     missing = sum(1 for c in all_claims if c["reason"] == "missing_section")
+#     parent = sum(1 for c in all_claims if c["reason"] == "parent_section")
+#     no_anchor = sum(1 for c in all_claims if c["reason"] == "no_anchor")
+#     checkable = total - missing - parent - no_anchor
+#     supported = sum(1 for c in all_claims if c["supported"])
+#     unsupported = checkable - supported
+#
+#     print(f"\n断言总数：{total}")
+#     print(f"  编造引用（节不存在）：{missing}")
+#     print(f"  父节（合法但无正文）：{parent}")
+#     print(f"  无法核验（无英文锚点）：{no_anchor}")
+#     print(f"  可核验：{checkable}")
+#     print(f"    支持：{supported}")
+#     print(f"    不支持：{unsupported}")
+#
+#     if checkable:
+#         print(f"\n引用主题一致性：{supported}/{checkable} = {supported / checkable * 100:.0f}%")
+#     print(f"可核验覆盖率：{checkable}/{total} = {checkable / total * 100:.0f}%")
+#
+#     print("\n=== 有问题的断言 ===")
+#     for c in all_claims:
+#         if c["reason"] in ("no_match", "missing_section"):
+#             print(f'  #{c["case_id"]} [{c["reason"]}] {c["claim"][:60]}')
+#             print(f'      引用: {c["cites"]}')
+#             print(f'      锚点: {c["anchors"]}')
+#
+#
+#
+#     # ===== LLM 抽检 =====
+#     import random
+#     random.seed(42)                    # 固定随机种子，保证可复现
+#
+#     ok_claims = [c for c in all_claims if c["supported"]]
+#     n = len(ok_claims)
+#     sample = random.sample(ok_claims, n)
+#
+#     print(f"\n=== LLM 抽检（{n} 条）===")
+#     agree = 0
+#     for c in sample:
+#         sec = _section_text(c["found_in"], corpus)
+#         verdict = _llm_judge(c["claim"], sec)
+#         good = "不支持" not in verdict
+#         agree += 1 if good else 0
+#         print(f'  {verdict:<6} {c["claim"][:55]}')
+#
+#     print(f'\n规则判"支持"的 {n} 条里，LLM 认可 {agree} 条')
+#     print(f"估计假阳性率：{((n - agree) / n * 100):.0f}%")
 
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    logging.getLogger().setLevel(logging.WARNING)
+if __name__ == '__main__':
+    test = """IAB-node 的两部分功能（见 §4.7.1）：
 
-    from tool_call_demo import _load_corpus, run_agent
-    from cases import CASES
+    **1. gNB-DU 功能（IAB-DU）**
+    - 终止到 UE 的 NR 接入接口；
+    - 终止到 gNB-CU 的 F1 协议。
 
-    corpus = _load_corpus()
-    print(f"语料：{len(corpus)} 块\n")
+    **2. UE 功能子集（IAB-MT）**
+    - 连接到父节点。
 
-    all_claims = []
-    for case in CASES:
-        r = run_agent(case["question"])
-        answer = r["answer"] or ""
-        claims = split_claims(answer)
-        for c in claims:
-            v = verify_claim(c, corpus)
-            v["case_id"] = case["id"]
-            v["question"] = case["question"]
-            all_claims.append(v)
-        print(f'#{case["id"]:2d}  断言 {len(claims)} 条')
+    补充：见 §4.7.4.3。"""
 
-    total = len(all_claims)
-    missing = sum(1 for c in all_claims if c["reason"] == "missing_section")
-    parent = sum(1 for c in all_claims if c["reason"] == "parent_section")
-    no_anchor = sum(1 for c in all_claims if c["reason"] == "no_anchor")
-    checkable = total - missing - parent - no_anchor
-    supported = sum(1 for c in all_claims if c["supported"])
-    unsupported = checkable - supported
-
-    print(f"\n断言总数：{total}")
-    print(f"  编造引用（节不存在）：{missing}")
-    print(f"  父节（合法但无正文）：{parent}")
-    print(f"  无法核验（无英文锚点）：{no_anchor}")
-    print(f"  可核验：{checkable}")
-    print(f"    支持：{supported}")
-    print(f"    不支持：{unsupported}")
-
-    if checkable:
-        print(f"\n引用主题一致性：{supported}/{checkable} = {supported / checkable * 100:.0f}%")
-    print(f"可核验覆盖率：{checkable}/{total} = {checkable / total * 100:.0f}%")
-
-    print("\n=== 有问题的断言 ===")
-    for c in all_claims:
-        if c["reason"] in ("no_match", "missing_section"):
-            print(f'  #{c["case_id"]} [{c["reason"]}] {c["claim"][:60]}')
-            print(f'      引用: {c["cites"]}')
-            print(f'      锚点: {c["anchors"]}')
-
-
-
-    # ===== LLM 抽检 =====
-    import random
-    random.seed(42)                    # 固定随机种子，保证可复现
-
-    ok_claims = [c for c in all_claims if c["supported"]]
-    n = len(ok_claims)
-    sample = random.sample(ok_claims, n)
-
-    print(f"\n=== LLM 抽检（{n} 条）===")
-    agree = 0
-    for c in sample:
-        sec = _section_text(c["found_in"], corpus)
-        verdict = _llm_judge(c["claim"], sec)
-        good = "不支持" not in verdict
-        agree += 1 if good else 0
-        print(f'  {verdict:<6} {c["claim"][:55]}')
-
-    print(f'\n规则判"支持"的 {n} 条里，LLM 认可 {agree} 条')
-    print(f"估计假阳性率：{((n - agree) / n * 100):.0f}%")
+    for c in split_claims(test):
+        print(f"引用: {c['cites']}")
+        print(f"断言: {c['claim'][:150]}")
+        print()
