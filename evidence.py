@@ -232,7 +232,7 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
     if not blocks:
         return ""
 
-    return "\n────———————————— 原文依据 ────————————————\n" + "\n\n".join(blocks)
+    return "\n—————————————————— 原文依据 ——————————————————\n" + "\n\n".join(blocks)
 
 
 if __name__ == "__main__":

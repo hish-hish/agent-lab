@@ -400,18 +400,25 @@ def _create_with_retry(**kwargs):
                 raise
 
 
-def run_agent(question: str) -> dict:
+def run_agent(question: str, history: list[dict] | None = None) -> dict:
     # 用户指令
+    MAX_HISTORY_TURNS = 5
     messages = [{"role": "system", "content": (
-            "回答涉及 3GPP 规范内容（例如 TS 38.300 的章节）时，"
-            "必须在答案中标注条款号，格式为 §4.7.1。"
-            "不要只写「第 4.7.1 节」或「4.7.1 节」，要写成 §4.7.1。"
-            "用户给出具体章节号（如 4.7.1）时用 get_doc_section；"
-            "用户只问概念、术语或功能（没有章节号）时用 search_docs 检索。"
-        )},{"role": "user", "content": question}]
+        "回答涉及 3GPP 规范内容（例如 TS 38.300 的章节）时，"
+        "必须在答案中标注条款号，格式为 §4.7.1。"
+        "不要只写「第 4.7.1 节」或「4.7.1 节」，要写成 §4.7.1。"
+        "用户给出具体章节号（如 4.7.1）时用 get_doc_section；"
+        "用户只问概念、术语或功能（没有章节号）时用 search_docs 检索。"
+    )}]
+
+    if history:
+        messages.extend(history[-MAX_HISTORY_TURNS * 2:])
+
+    messages.append({"role": "user", "content": question})
 
     # 进行循环对话
     MAX_ROUNDS = 5
+
     final_answer = None
     round_no = 1
     seen = {}  # 账本 用来记录之前是否问过
@@ -487,10 +494,15 @@ def run_agent(question: str) -> dict:
         except Exception as e:
             log.warning("依据生成失败：%s: %s", type(e).__name__, e)
 
+    new_history = list(history or [])
+    new_history.append({"role": "user", "content": question})
+    if final_answer:
+        new_history.append({"role": "assistant", "content": final_answer})
     return {
         "ok": final_answer is not None,
         "answer": final_answer,
         "evidence": evidence_text,
+        "history": new_history,
         "rounds": round_no,
         "reason": "stop" if final_answer else "no_answer",
     }
