@@ -149,7 +149,6 @@ def extract_anchors(claim: str, corpus: list[dict] | None = None) -> list[str]:
         kept = []
         for a in mark:
             df = sum(1 for t in lower_texts if a.lower() in t)
-            print(f"      [df] {a:<18} {df}")
             if df <= MAX_ANCHOR_DF:
                 kept.append(a)
         mark = kept

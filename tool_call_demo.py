@@ -478,16 +478,28 @@ def run_agent(question: str) -> dict:
                 })
         round_no += 1
 
+    evidence_text = ""
+    if final_answer:
+        from evidence import build_evidence
+
+        try:
+            evidence_text = build_evidence(final_answer, _load_corpus())
+        except Exception as e:
+            log.warning("依据生成失败：%s: %s", type(e).__name__, e)
+
     return {
-            "ok": final_answer is not None,
-            "answer": final_answer,
-            "rounds": round_no,
-            "reason": "stop" if final_answer else "no_answer",
-        }
+        "ok": final_answer is not None,
+        "answer": final_answer,
+        "evidence": evidence_text,
+        "rounds": round_no,
+        "reason": "stop" if final_answer else "no_answer",
+    }
 
 if __name__ == "__main__":
-    result = run_agent("给我看看annexg")
-    print(result)
+    result = run_agent("IAB-donor 是什么")
+    print("────————————————  答案  ────————————————\n", result["answer"])
+    print()
+    print(result["evidence"] or "（无依据）")
 
 
 

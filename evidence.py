@@ -218,15 +218,12 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
                 picked = pick_sentences(section, ["LTM", "UE", "gNB", "IAB", "RRC"])
             if not picked:
                 continue
-            print(f"    [{cite}] 锚点={anchors}")
-            print(f"    [{cite}] picked={len(picked)}字 含|={sum(1 for ln in picked.split(chr(10)) if '|' in ln)}")
-
             spans = extract_spans(c["claim"], picked)
             spans = verify_verbatim(spans, section)
 
             if spans:
                 trimmed = [trim_span(s, anchors) for s in spans]
-                body = "\n".join(f"  {s}" for s in trimmed)
+                body = "\n".join(f"  {i}. {s}" for i, s in enumerate(trimmed, 1))
             else:
                 body = "  （未在该节找到直接依据）"
 
@@ -235,7 +232,7 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
     if not blocks:
         return ""
 
-    return "\n──── 依据原文 ────\n" + "\n".join(blocks)
+    return "\n────———————————— 原文依据 ────————————————\n" + "\n\n".join(blocks)
 
 
 if __name__ == "__main__":
@@ -259,7 +256,7 @@ if __name__ == "__main__":
     for q in questions:
         r = run_agent(q)
         ans = r["answer"] or ""
-        ev = build_evidence(ans, corpus)
+        ev = r.get("evidence", "")
 
         print("=" * 70)
         print("问：", q)
