@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tool_call_demo import _normalize_num
 from tool_call_demo import _load_corpus
 
-CITE_ANY = re.compile(r"§\s*\d+(?:\.\d+)+|Annex\s+[A-H]\b|Table\s+[A-H]-\d+")
+CITE_ANY = re.compile(r"§\s*\d+(?:\.\d+)*|Annex\s+[A-H]\b|Table\s+[A-H]-\d+")
 EN_TERM  = re.compile(r"[A-Za-z][A-Za-z0-9\-\.]{1,}")
 
 STOP = {
@@ -44,6 +44,12 @@ def _is_list_line(line: str) -> bool:
 
 
 def split_claims(answer: str) -> list[dict]:
+    _NOT_A_CLAIM = (
+        "工具返回",
+        "可查的编号",
+        "检索不到",
+        "我没能",
+    )
     """把答案拆成"带引用的断言"。
 
     进：答案全文（含中文、markdown、表格）
@@ -114,8 +120,9 @@ def split_claims(answer: str) -> list[dict]:
             continue
         if len(sentence) < 8:
             continue
+        if any(p in sentence for p in _NOT_A_CLAIM):
+            continue
         result.append({"claim": sentence, "cites": cites})
-
     return result
 
 def extract_anchors(claim: str, corpus: list[dict] | None = None) -> list[str]:
@@ -252,94 +259,5 @@ def verify_claim(claim: dict, corpus: list[dict]) -> dict:
     return _result(claim, anchors, False, None, "no_match")
 
 
-# if __name__ == "__main__":
-#     import logging
-#     import sys
-#     from pathlib import Path
-#
-#     sys.path.insert(0, str(Path(__file__).parent.parent))
-#     logging.getLogger().setLevel(logging.WARNING)
-#
-#     from tool_call_demo import _load_corpus, run_agent
-#     from cases import CASES
-#
-#     corpus = _load_corpus()
-#     print(f"语料：{len(corpus)} 块\n")
-#
-#     all_claims = []
-#     for case in CASES:
-#         r = run_agent(case["question"])
-#         answer = r["answer"] or ""
-#         claims = split_claims(answer)
-#         for c in claims:
-#             v = verify_claim(c, corpus)
-#             v["case_id"] = case["id"]
-#             v["question"] = case["question"]
-#             all_claims.append(v)
-#         print(f'#{case["id"]:2d}  断言 {len(claims)} 条')
-#
-#     total = len(all_claims)
-#     missing = sum(1 for c in all_claims if c["reason"] == "missing_section")
-#     parent = sum(1 for c in all_claims if c["reason"] == "parent_section")
-#     no_anchor = sum(1 for c in all_claims if c["reason"] == "no_anchor")
-#     checkable = total - missing - parent - no_anchor
-#     supported = sum(1 for c in all_claims if c["supported"])
-#     unsupported = checkable - supported
-#
-#     print(f"\n断言总数：{total}")
-#     print(f"  编造引用（节不存在）：{missing}")
-#     print(f"  父节（合法但无正文）：{parent}")
-#     print(f"  无法核验（无英文锚点）：{no_anchor}")
-#     print(f"  可核验：{checkable}")
-#     print(f"    支持：{supported}")
-#     print(f"    不支持：{unsupported}")
-#
-#     if checkable:
-#         print(f"\n引用主题一致性：{supported}/{checkable} = {supported / checkable * 100:.0f}%")
-#     print(f"可核验覆盖率：{checkable}/{total} = {checkable / total * 100:.0f}%")
-#
-#     print("\n=== 有问题的断言 ===")
-#     for c in all_claims:
-#         if c["reason"] in ("no_match", "missing_section"):
-#             print(f'  #{c["case_id"]} [{c["reason"]}] {c["claim"][:60]}')
-#             print(f'      引用: {c["cites"]}')
-#             print(f'      锚点: {c["anchors"]}')
-#
-#
-#
-#     # ===== LLM 抽检 =====
-#     import random
-#     random.seed(42)                    # 固定随机种子，保证可复现
-#
-#     ok_claims = [c for c in all_claims if c["supported"]]
-#     n = len(ok_claims)
-#     sample = random.sample(ok_claims, n)
-#
-#     print(f"\n=== LLM 抽检（{n} 条）===")
-#     agree = 0
-#     for c in sample:
-#         sec = _section_text(c["found_in"], corpus)
-#         verdict = _llm_judge(c["claim"], sec)
-#         good = "不支持" not in verdict
-#         agree += 1 if good else 0
-#         print(f'  {verdict:<6} {c["claim"][:55]}')
-#
-#     print(f'\n规则判"支持"的 {n} 条里，LLM 认可 {agree} 条')
-#     print(f"估计假阳性率：{((n - agree) / n * 100):.0f}%")
-
 if __name__ == '__main__':
-    test = """IAB-node 的两部分功能（见 §4.7.1）：
-
-    **1. gNB-DU 功能（IAB-DU）**
-    - 终止到 UE 的 NR 接入接口；
-    - 终止到 gNB-CU 的 F1 协议。
-
-    **2. UE 功能子集（IAB-MT）**
-    - 连接到父节点。
-
-    补充：见 §4.7.4.3。"""
-
-    for c in split_claims(test):
-        print(f"引用: {c['cites']}")
-        print(f"断言: {c['claim'][:150]}")
-        print()
+    print(CITE_ANY.findall("见 §2 和 §4.7.1，以及 §4"))

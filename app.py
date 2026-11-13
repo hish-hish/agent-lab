@@ -68,4 +68,4 @@ with gr.Blocks(title="5G NR 架构问答（TS 38.300）") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)
