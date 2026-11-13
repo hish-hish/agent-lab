@@ -508,7 +508,7 @@ def run_agent(question: str, history: list[dict] | None = None) -> dict:
     }
 
 if __name__ == "__main__":
-    result = run_agent("IAB-donor 是什么")
+    result = run_agent("IAB-node 是什么")
     print("────————————————  答案  ────————————————\n", result["answer"])
     print()
     print(result["evidence"] or "（无依据）")

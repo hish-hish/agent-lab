@@ -18,7 +18,7 @@ def pick_sentences(section_text: str, anchors: list[str], top_n: int = 10,max_ch
         if not line:
             continue
         for par in line.split(". "):
-            par = par.strip()
+            par = par.strip().lstrip("-\t•* \u3000").strip()
             if par:
                 sentence_list.append(par)
 
@@ -221,12 +221,14 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
             spans = extract_spans(c["claim"], picked)
             spans = verify_verbatim(spans, section)
 
-            if spans:
-                trimmed = [trim_span(s, anchors) for s in spans]
-                body = "\n".join(f"  {i}. {s}" for i, s in enumerate(trimmed, 1))
-            else:
-                body = "  （未在该节找到直接依据）"
+            if not spans:
+                continue  # 没抽到任何片段，这一节直接跳过
 
+            trimmed = [trim_span(s, anchors) for s in spans]
+            if not trimmed:
+                continue  # 抽到了但全被过滤掉，也跳过
+
+            body = "\n".join(f"  {i}. {s}" for i, s in enumerate(trimmed, 1))
             blocks.append(f"{cite}：\n{body}")
 
     if not blocks:
