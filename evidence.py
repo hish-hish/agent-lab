@@ -197,6 +197,7 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
         return ""
 
     blocks = []
+    missing = []
     seen = set()
 
     for c in claims:
@@ -209,6 +210,7 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
 
             section = _section_text(cite, corpus)
             if not section:
+                missing.append(cite)
                 continue
 
             if anchors:
@@ -217,25 +219,30 @@ def build_evidence(answer: str, corpus: list[dict]) -> str:
                 # 没锚点：用兜底锚点（常见技术词）挑句子，表格块会被整块带上
                 picked = pick_sentences(section, ["LTM", "UE", "gNB", "IAB", "RRC"])
             if not picked:
+                missing.append(cite)
                 continue
             spans = extract_spans(c["claim"], picked)
             spans = verify_verbatim(spans, section)
 
             if not spans:
+                missing.append(cite)
                 continue  # 没抽到任何片段，这一节直接跳过
 
             trimmed = [trim_span(s, anchors) for s in spans]
             if not trimmed:
+                missing.append(cite)
                 continue  # 抽到了但全被过滤掉，也跳过
 
             body = "\n".join(f"  {i}. {s}" for i, s in enumerate(trimmed, 1))
             blocks.append(f"{cite}：\n{body}")
+    warn = ""
+    if missing:
+        warn = "⚠️ 以下章节没有找到原文依据：" + "、".join(missing) + "\n"
 
     if not blocks:
-        return ""
+        return warn
 
-    return "\n—————————————————— 原文依据 ——————————————————\n" + "\n\n".join(blocks)
-
+    return warn + "\n—————————————————— 原文依据 ——————————————————\n" + "\n\n".join(blocks)
 
 if __name__ == "__main__":
     import logging

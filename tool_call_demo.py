@@ -159,7 +159,6 @@ def get_doc_section(num: str) -> str:
 # ============ RAG 检索 ============
 _rag_index = None
 
-
 def _load_rag():
     """懒加载：第一次调用才读 corpus.json 并建索引（1–2 秒）。"""
     global _rag_index
@@ -508,7 +507,7 @@ def run_agent(question: str, history: list[dict] | None = None) -> dict:
     }
 
 if __name__ == "__main__":
-    result = run_agent("IAB-node 是什么")
+    result = run_agent("§2 讲了什么")
     print("────————————————  答案  ────————————————\n", result["answer"])
     print()
     print(result["evidence"] or "（无依据）")
